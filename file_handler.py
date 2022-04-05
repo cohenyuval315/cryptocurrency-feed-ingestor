@@ -1,12 +1,8 @@
-import asyncio
-import atexit
 import json
 import pandas as pd
 import os.path
-import time
 import datetime
 import pathlib
-import aiofiles
 
 from client.backend.kafka_impl import KafkaFeedConsumer
 
