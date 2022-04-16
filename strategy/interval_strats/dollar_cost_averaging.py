@@ -1,8 +1,11 @@
 import asyncio
+import os
+import pathlib
 from typing import Type
 
 from binance import AsyncClient, BinanceSocketManager
 
+from client.creds.creds_helpers import load_correct_key_info, load_config
 from client.exchange.binance_impl import Binance
 from client.exchange.exchange_model.exchange import Exchange, RestExchange
 from client.strategy.model.interval_strategy import IntervalStrategy
@@ -10,7 +13,6 @@ from client.strategy.model.interval_strategy import IntervalStrategy
 
 class DCA(IntervalStrategy):
 
-    # remove streams
     def __init__(self,
                  strategy_name: str,
                  strategy_desc: str,
@@ -41,14 +43,12 @@ class DCA(IntervalStrategy):
 
     # this msg done in the intervals arguments automatically
     async def process_data(self, data):
-        precentage = 10 / 100
-        partition = self.quantity * precentage
-        btcusdt = self.symbols[0]
+        btc_quantity = 0.00046
+        btc_usdt = "BTCUSDT"
         print("ordering")
-        # NO CLIENT I FORGOT I NEED TO DO THAT SOMEHOW
-
-        await self.exchange.spot_order(symbol=btcusdt, order_type=Binance.ORDER_TYPE_MARKET,
-                                       side="BUY", quantity=partition, test=True)
+        # quantity of BTC you want to buy!!!
+        await self.exchange.spot_order(symbol=btc_usdt, order_type=Binance.ORDER_TYPE_MARKET,
+                                       side="BUY", quantity=btc_quantity)
         print("done ordering")
-        # await self.exchange.spot_order(self=self.exchange,symbol=btcusdt, order_type=Binance.ORDER_TYPE_MARKET,
-        #                          side="BUY", quoteOrderQty=partition, test=True)
+
+

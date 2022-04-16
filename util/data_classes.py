@@ -10,11 +10,11 @@ class RateLimit:
 
 
 @dataclasses.dataclass(frozen=True)
-class ExchangeFeedKafka:
+class ExchangeFeed:
+    # maybe split all
     exchange: str
-    event: str
-    interval: str
+    event_time: str
     symbol: str
-
-
-
+    event_type: str
+    interval: str = None
+    data: dict = None

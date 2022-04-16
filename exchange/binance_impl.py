@@ -1,100 +1,44 @@
-import asyncio
+
 import datetime
-import time
 from binance import AsyncClient, BinanceSocketManager, Client
 from binance.enums import HistoricalKlinesType
-from client.exchange.exchange_model.exchange_helpers import prep_order_request
+from client.exchange.exchange_model.exchange_helpers import limit_num_api
 from client.exchange.exchange_model.feed import Feed
 from client.exchange.exchange_model.exchange import RestExchange
-from client.util.data_classes import RateLimit, ExchangeFeedKafka
-
-
-def limit_num_api_req_update(request_size, is_order=False):
-    def wrapper(coroutine):
-        async def wrapped(self, **kwargs):
-            print("before")
-            al = self.api_limits
-            if al.limit < request_size + self.limit_request_num:
-                return False
-            if is_order:
-                pass
-            res = await coroutine(self, **kwargs)
-            info = self.client.response.headers
-            d0 = info['x-mbx-used-weight']
-            d = info['x-mbx-used-weight-1m']
-            self.limit_request_num = d
-            print(d0)
-            print(d)
-            print("after")
-            return res
-
-        return wrapped
-
-    return wrapper
-
-
-#
-# def limit_num_order_interval_update(request_size):
-#     def wrapper(coroutine):
-#         async def wrapped(self, *args, **kwargs):
-#             print("before")
-#             # maybe add datetime
-#             ol1 = self.order_limits[0]
-#             ol2 = self.order_limits[1]
-#
-#             if ol1.limit < request_size + self.limit_request_num:
-#                 return False
-#             if ol2.limit < request_size + self.limit_request_num:
-#                 return False
-#             res = await coroutine(self, args, kwargs)
-#             info = self.client.response.headers
-#             p = info["X-MBX-ORDER-COUNT"]
-#             p1 = info["X-MBX-ORDER-COUNT-1d"]
-#             self.limit_order_num = (p1, p)
-#             self.limit_request_num = p
-#             print(p)
-#             print(p1)
-#             print("after")
-#             self.date_time_for_limits
-#             return res
-#         return wrapped
-#     return wrapper
+from client.util.data_classes import RateLimit, ExchangeFeed
 
 
 class BinanceRest(RestExchange):
     BINANCE = "binance"
-    CANDLE = "kline"
-    USER = "user"
-    TRADE = "trade"
-    BOOK = "book"
-    AGG_TRADE = "aggTrade"
-    DEPTH_100 = "depth100"
-    DEPTH_1000 = "depth"
-    DEPTH = "depth"
     SPOT = "SPOT"
     MARGIN = "MARGIN"
     FUTURE = "FUTURES"
-    MAX_NUM_STREAMS_FOR_CONNECTION = 950
 
     # <--- INIT --->
-    def __init__(self):
-        self.client = None
+    def __init__(self, client: AsyncClient):
+        # MAYBE put them in REST-EXCHANGE class todo
+        self.client = client
+        self.exchange_info = None
+        self.valid_symbols = None
         self.limit_request_num = None
-        self.limit_order_num = None
+        self.limit_order_num: tuple = (0, 0)
         self.order_limits = None
         self.api_limits = None
-        self.exchange_info = None
-        self.date_time_for_limits = datetime.datetime.now()
+        self.date_time_for_sec_limits = datetime.datetime.now()
+        self.date_time_for_day_limits = datetime.datetime.now()
         self.coins_info = None
-        self.valid_symbols = None
 
     def init_information(self, *kwargs):
-        c = Client()
+        c = Client()  # todo clean
         self.exchange_info = c.get_exchange_info()
         self.valid_symbols = [symbol["symbol"] for symbol in self.exchange_info["symbols"] if
                               symbol["isSpotTradingAllowed"]]
+        status = c.get_system_status()
+        if status["status"] > 0:
+            print(self.BINANCE, " ", status["msg"])
+            raise Exception("binance server offline")
         c.close_connection()
-        self.limit_request_num = 12
+        self.limit_request_num = 13
         self.limit_order_num = (0, 0)
         rl = self.exchange_info["rateLimits"]
         rtemp = rl[1]
@@ -132,8 +76,11 @@ class BinanceRest(RestExchange):
         self.order_limits = [order_limit_1, order_limit_2]
         self.api_limits = api_limit_1
 
-    # @limit_num_api_req_update(1)
-    async def _check_availability_status(self):
+    async def get_client(self):
+        return self.client
+
+    @limit_num_api(1)
+    async def _check_availability_status(self, **kwargs):
         """check if server online"""
         status = await self.client.get_system_status()
         if status["status"] > 0:
@@ -141,16 +88,13 @@ class BinanceRest(RestExchange):
             return False
         return True
 
-    async def _get_client(self):
-        return self.client
-
     async def get_spot_symbols_names(self, **kwargs):
         all_symbols = await self.get_all_symbols_info()
         lst = [symbol["symbol"] for symbol in all_symbols if symbol["isSpotTradingAllowed"]]
         return lst
 
     # <--- INFO --->
-    # @limit_num_api_req_update(2)
+    @limit_num_api(2)
     async def get_all_symbols_prices(self):
         """all current symbols base/quote
 
@@ -167,9 +111,6 @@ class BinanceRest(RestExchange):
         """
         info = await self.client.get_all_tickers()
         return info
-
-    async def order_num_update(self):
-        pass
 
     async def get_all_symbols_info(self, **kwargs):
         """Return rate limits and list of symbols
@@ -232,15 +173,12 @@ class BinanceRest(RestExchange):
             return
         return self.exchange_info["symbols"]
 
-    # @prep_api_request(10)
-    # limit_num_api_req_update(10)
+    @limit_num_api(10)
     async def get_exchange_info(self, **kwargs):
         binance_info = await self.client.get_exchange_info()
         return binance_info
 
-    # 5
-    # @prep_api_request(1)
-    # limit_num_api_req_update(5)
+    @limit_num_api(5)
     async def get_history_klines(self, symbol, interval, start_str, end_str=None, limit=500,
                                  klines_type=HistoricalKlinesType.SPOT):
         """Get Historical Klines from Binance
@@ -281,7 +219,7 @@ class BinanceRest(RestExchange):
                                                        klines_type=klines_type)
         return info
 
-    @limit_num_api_req_update(5)
+    @limit_num_api(5)
     async def get_history_trades(self, symbol: str, limit: int = None, fromId: str = None):
         """get recent trades for symbol default 500 max 1000 or from last order id
 
@@ -310,7 +248,7 @@ class BinanceRest(RestExchange):
         info = await self.client.get_historical_trades(symbol=symbol, limit=limit, fromId=fromId)
         return info
 
-    @limit_num_api_req_update(10)
+    @limit_num_api(10)
     async def get_all_coins_info(self):
         """return all coins info
 
@@ -411,48 +349,48 @@ class BinanceRest(RestExchange):
         return info
 
     # <--- ACCOUNT --->
-    @limit_num_api_req_update(10)
+    @limit_num_api(10)
     async def get_account(self, **kwargs):
         res = await self.client.get_account()
         return res
 
-    @limit_num_api_req_update(10)
+    @limit_num_api(10)
     async def get_account_coin_balance(self, coin):
         bal = await self.client.get_asset_balance(coin)
         return bal
 
-    @limit_num_api_req_update(1)
+    @limit_num_api(1)
     async def coins_transportation_details(self, **kwargs):
         details = await self.client.get_asset_details()
         return details
 
-    @limit_num_api_req_update(1)
+    @limit_num_api(1)
     async def get_account_permissions(self, **kwargs):
         res = await self.client.get_account_api_permissions()
         return res
 
-    @limit_num_api_req_update(10)
+    @limit_num_api(10)
     async def get_account_orders(self, **kwargs):
         """Get all account orders; active, canceled, or filled."""
         res = await self.client.get_all_orders()
         return res
 
-    @limit_num_api_req_update(1)
+    @limit_num_api(1)
     async def get_account_api_trading_status(self, **kwargs):
         res = await self.client.get_account_api_trading_status()
         return res
 
-    @limit_num_api_req_update(1)
+    @limit_num_api(1)
     async def get_account_status(self, **kwargs):
         res = await self.client.get_account_status()
         return res
 
-    @limit_num_api_req_update(2400)
+    @limit_num_api(2400)
     async def get_account_snapshot(self, **kwargs):
         acc = await self.client.get_account_snapshot()
         return acc
 
-    @limit_num_api_req_update(10)
+    @limit_num_api(10)
     async def get_number_of_running_orders(self, symbol=None):
         if symbol:
             orders = await self.client.get_open_orders(symbol=symbol)
@@ -462,8 +400,7 @@ class BinanceRest(RestExchange):
             return orders, 40
 
     # <--- ACTIONS -->
-    # @limit_num_api_req_update(4)
-    # @limit_num_order_interval_update(4)
+    @limit_num_api(4, True)
     async def spot_oco_order(self, symbol: str, side: str, stopPrice, quantity: float = None, price: str = None
                              , timeInForce: str = None, stopLimitPrice: str = None, stopIcebergQty=None,
                              newOrderRespType: str = None, recvWindow: int = None, listClientOrderId: str = None,
@@ -518,7 +455,7 @@ class BinanceRest(RestExchange):
                                                newOrderRespType=newOrderRespType)
             return
 
-    # @limit_num_api_req_update(2)
+    @limit_num_api(2, True)
     async def spot_order(self, symbol: str, order_type: str, side: str, quantity: float = None, price: str = None,
                          stopPrice: str = None, timeInForce: str = None, quoteOrderQty=None, iceberqQty: float = None,
                          newOrderRespType: str = None, recvWindow: int = None, newClientOrderId: str = None,
@@ -571,9 +508,7 @@ class BinanceRest(RestExchange):
         # self.client.create_order()
         # self.client.cancel_order()
 
-    # need trying
-    # @limit_num_api_req_update(1)
-    # @prep_order_request
+    @limit_num_api(1)
     async def spot_cancel_order(self, symbol: str, orderId: str, recvWindow: int = None):
         """
         :param symbol: required
@@ -595,7 +530,7 @@ class BinanceRest(RestExchange):
     # 101-500	5
     # 501-1000	10
     # 1001-5000	50
-    @limit_num_api_req_update(50)
+    # @limit_num_api_req_update(50)
     async def get_order_book_snapshot(self, symbol: str, limit: int = None):
         """
         :param symbol: required
@@ -627,7 +562,7 @@ class BinanceRest(RestExchange):
         book = await self.client.get_order_book(symbol=symbol, limit=limit)
         return book
 
-    @limit_num_api_req_update(2)
+    @limit_num_api(2)
     async def get_all_order_books_best_tickers(self):
         """Best price/qty on the order book for all symbols.
 
@@ -656,46 +591,40 @@ class BinanceRest(RestExchange):
 
 
 class Binance(Feed, BinanceRest):
+    # UNUSED FOR NOW
     #  future binance or maybe not
     # 'STOP_LOSS_LIMIT',
     # 'TAKE_PROFIT_LIMIT'
-    supported_spot_order_types = {'LIMIT', 'MARKET', 'STOP_LOSS', 'TAKE_PROFIT', 'LIMIT_MAKER'}
-
-    supported_time_in_force = {'GTC', 'IOC', 'FOK'}
-    supported_candle_intervals = {'1m', '3m', '5m', '15m', '30m', '1h', '2h', '4h', '6h', '8h', '12h', '1d', '3d', '1w',
-                                  '1M'}
-
-    ORDER_TYPE_LIMIT_MAKER = 'LIMIT_MAKER'  # You will only be charged a maker fee, will not match existing order, only new ones
-    ORDER_TYPE_TAKE_PROFIT = 'TAKE_PROFIT'  # won't show on order book
-    ORDER_TYPE_MARKET = 'MARKET'  # whatever the market is now
-    ORDER_TYPE_STOP_LOSS = "STOP_LOSS"  # at the price become market type
-    ORDER_TYPE_LIMIT = "LIMIT"  # need TimeInForce type
-
-    TIME_IN_FORCE_GTC = 'GTC'  # Good till cancelled
-    TIME_IN_FORCE_IOC = 'IOC'  # Immediate or cancel (execute all or part immediately and then cancels any unfilled portion of the order)
-    TIME_IN_FORCE_FOK = 'FOK'  # Fill or kill (fully execute all the order or none)
-
-    KLINE_INTERVAL_1MINUTE = '1m'
-    KLINE_INTERVAL_3MINUTE = '3m'
-    KLINE_INTERVAL_5MINUTE = '5m'
-    KLINE_INTERVAL_15MINUTE = '15m'
-    KLINE_INTERVAL_30MINUTE = '30m'
-    KLINE_INTERVAL_1HOUR = '1h'
-    KLINE_INTERVAL_2HOUR = '2h'
-    KLINE_INTERVAL_4HOUR = '4h'
-    KLINE_INTERVAL_6HOUR = '6h'
-    KLINE_INTERVAL_8HOUR = '8h'
-    KLINE_INTERVAL_12HOUR = '12h'
-    KLINE_INTERVAL_1DAY = '1d'
-    KLINE_INTERVAL_3DAY = '3d'
-    KLINE_INTERVAL_1WEEK = '1w'
-    KLINE_INTERVAL_1MONTH = '1M'
-
-    order_status = {'NEW', 'PARTIALLY_FILLED', 'FILLED', 'CANCELED', 'PENDING_CANCEL', 'REJECTED', 'EXPIRED'}
-    order_resp_type = {'ACK', 'RESULT', 'FULL'}
-
-    aggregate_info_type = {'ACK', 'RESULT', 'FULL', 'a', 'p', 'q', 'f', 'l', 'T', 'm', 'M'}
-
+    # supported_spot_order_types = {'LIMIT', 'MARKET', 'STOP_LOSS', 'TAKE_PROFIT', 'LIMIT_MAKER'}
+    # supported_time_in_force = {'GTC', 'IOC', 'FOK'}
+    # supported_candle_intervals = {'1m', '3m', '5m', '15m', '30m', '1h', '2h', '4h', '6h', '8h', '12h', '1d', '3d', '1w',
+    #                               '1M'}
+    # ORDER_TYPE_LIMIT_MAKER = 'LIMIT_MAKER'  # You will only be charged a maker fee, will not match existing order, only new ones
+    # ORDER_TYPE_TAKE_PROFIT = 'TAKE_PROFIT'  # won't show on order book
+    # ORDER_TYPE_MARKET = 'MARKET'  # whatever the market is now
+    # ORDER_TYPE_STOP_LOSS = "STOP_LOSS"  # at the price become market type
+    # ORDER_TYPE_LIMIT = "LIMIT"  # need TimeInForce type
+    # TIME_IN_FORCE_GTC = 'GTC'  # Good till cancelled
+    # TIME_IN_FORCE_IOC = 'IOC'  # Immediate or cancel (execute all or part immediately and then cancels any unfilled portion of the order)
+    # TIME_IN_FORCE_FOK = 'FOK'  # Fill or kill (fully execute all the order or none)
+    # KLINE_INTERVAL_1MINUTE = '1m'
+    # KLINE_INTERVAL_3MINUTE = '3m'
+    # KLINE_INTERVAL_5MINUTE = '5m'
+    # KLINE_INTERVAL_15MINUTE = '15m'
+    # KLINE_INTERVAL_30MINUTE = '30m'
+    # KLINE_INTERVAL_1HOUR = '1h'
+    # KLINE_INTERVAL_2HOUR = '2h'
+    # KLINE_INTERVAL_4HOUR = '4h'
+    # KLINE_INTERVAL_6HOUR = '6h'
+    # KLINE_INTERVAL_8HOUR = '8h'
+    # KLINE_INTERVAL_12HOUR = '12h'
+    # KLINE_INTERVAL_1DAY = '1d'
+    # KLINE_INTERVAL_3DAY = '3d'
+    # KLINE_INTERVAL_1WEEK = '1w'
+    # KLINE_INTERVAL_1MONTH = '1M'
+    # order_status = {'NEW', 'PARTIALLY_FILLED', 'FILLED', 'CANCELED', 'PENDING_CANCEL', 'REJECTED', 'EXPIRED'}
+    # order_resp_type = {'ACK', 'RESULT', 'FULL'}
+    # aggregate_info_type = {'ACK', 'RESULT', 'FULL', 'a', 'p', 'q', 'f', 'l', 'T', 'm', 'M'}
     # For accessing the data returned by Client.aggregate_trades().
     # ORDER_RESP_TYPE_ACK
     # ORDER_RESP_TYPE_RESULT
@@ -708,40 +637,37 @@ class Binance(Feed, BinanceRest):
     # AGG_TIME
     # AGG_BUYER_MAKES
     # AGG_BEST_MATCH
+    # ORDER_RESP_TYPE_ACK = 'ACK' ORDER_RESP_TYPE_RESULT = 'RESULT' ORDER_RESP_TYPE_FULL = 'FULL' AGG_ID = 'a'
+    # AGG_PRICE = 'p' AGG_QUANTITY = 'q' AGG_FIRST_TRADE_ID = 'f' AGG_LAST_TRADE_ID = 'l' AGG_TIME = 'T'
+    # AGG_BUYER_MAKES = 'm' AGG_BEST_MATCH = 'M' future_order_types = {'LIMIT', 'MARKET', 'STOP', 'STOP_MARKET',
+    # 'TAKE_PROFIT', 'TAKE_PROFIT_MARKET', 'LIMIT_MAKER'} might need some of those variables exceptions=None,
+    # log_message_on_error=False delay_start=delay_start log_message_on_error=log_message_on_error
+    # exceptions=exceptions callbacks=callbacks timeout_interval=timeout_interval, timeout=timeout, , channels=channels
 
-    # ORDER_RESP_TYPE_ACK = 'ACK'
-    # ORDER_RESP_TYPE_RESULT = 'RESULT'
-    # ORDER_RESP_TYPE_FULL = 'FULL'
-    # AGG_ID = 'a'
-    # AGG_PRICE = 'p'
-    # AGG_QUANTITY = 'q'
-    # AGG_FIRST_TRADE_ID = 'f'
-    # AGG_LAST_TRADE_ID = 'l'
-    # AGG_TIME = 'T'
-    # AGG_BUYER_MAKES = 'm'
-    # AGG_BEST_MATCH = 'M'
+    CANDLE = "kline"
+    TRADE = "trade"
+    AGG_TRADE = "aggTrade"
+    TICKER_24 = "24hrTicker"
+    MINI_TICKER_24 = "24hrMiniTicker"
+    BOOK_TICKER = "bookTicker"
+    DEPTH_EVENT = "depthUpdate"
+    BOOK = "book"
+    DEPTH_100 = "depth100"
+    DEPTH_1000 = "depth"
 
-    # future_order_types = {'LIMIT', 'MARKET', 'STOP', 'STOP_MARKET', 'TAKE_PROFIT', 'TAKE_PROFIT_MARKET', 'LIMIT_MAKER'}
-    # might need some of those variables
-    # exceptions=None, log_message_on_error=False
-    # delay_start=delay_start log_message_on_error=log_message_on_error exceptions=exceptions callbacks=callbacks
-    # timeout_interval=timeout_interval, timeout=timeout, , channels=channels
+    i = 1
+    MAX_NUM_STREAMS_FOR_CONNECTION = 950
 
-    def __init__(self, client: AsyncClient, binance_socket_manager: BinanceSocketManager, kafka_producers=None) -> None:
-        super(Binance, self).__init__()
+    def __init__(self, client: AsyncClient, binance_socket_manager: BinanceSocketManager) -> None:
+        super(Binance, self).__init__(client)
         self.init_information()
-        self.client = client
         self.binance_socket_manager = binance_socket_manager  # handle socket streams
-        self.channels = kafka_producers
-        self.delay_start = 0
-        self.timeout = 999999  # how long to run
         self.all_streams_info: dict = {}
-        self._feeds_coroutine = None
         self._runnable_streams = []
+        self._feeds_coroutine = None
+        self.delay_start = 0
+        self.timeout = 999999
 
-        # self.feeds_coroutines_gather = None
-
-    # <--- INIT --->
     def add_feed(self, symbols, streams: list, candle_intervals: list = None, max_depth=0) -> None:
         if not candle_intervals:
             candle_intervals = ["1m"]
@@ -753,15 +679,6 @@ class Binance(Feed, BinanceRest):
         self._runnable_streams = self._runnable_streams + lst
         self._runnable_streams = list(set(self._runnable_streams))
         self._add_instance_streams_info(streams, symbols, candle_intervals)
-
-
-    def set_time_settings(self, timeout=999999, delay_start=3) -> None:
-        self.timeout = timeout
-        self.delay_start = delay_start
-
-    # <--- helpers --->
-    def get_name(self) -> str:
-        return self.BINANCE
 
     def _normalize_instance_streams_for_socket(self, streams, symbols, candle_intervals) -> list:
         normal_stream = []
@@ -777,10 +694,10 @@ class Binance(Feed, BinanceRest):
                 normal_stream.append("@aggTrade")
             if key == self.USER:
                 continue
-            if key == self.DEPTH_100:
-                normal_stream.append("@depth@100ms")
-            if key == self.DEPTH_1000:
-                normal_stream.append("@depth")
+            # if key == self.DEPTH_100:
+            #     normal_stream.append("@depth@100ms")
+            # if key == self.DEPTH_1000:
+            #     normal_stream.append("@depth")
 
         ready_streams = [symbol.lower() + stream for symbol in symbols for stream in normal_stream]
         ready_streams = list(set(ready_streams))
@@ -809,96 +726,77 @@ class Binance(Feed, BinanceRest):
             for symbol in symbols:
                 self.all_streams_info[stream].append(symbol)
 
-    def get_all_streams_kafka_topics(self) -> list[ExchangeFeedKafka]:
-        l = []
-        for key, value in self.all_streams_info.items():
-            if key == self.USER:
+    def set_timeout(self, timeout):
+        self.timeout = timeout
+
+    def set_delay_start(self, delay_start):
+        self.delay_start = delay_start
+
+    def get_name(self) -> str:
+        return self.BINANCE
+
+    def get_streams(self) -> dict:
+        return self.all_streams_info
+
+    def get_delay_start(self):
+        pass
+
+    def get_timeout(self):
+        return self.timeout
+
+    def get_feed_socket_object(self):
+        sm = self.binance_socket_manager.multiplex_socket(self._runnable_streams)
+        return sm
+
+    def get_user_socket_object(self):
+        sm = self.binance_socket_manager.user_socket()
+        return sm
+
+    def get_all_exchange_feed(self) -> list[ExchangeFeed]:
+        lst = []
+        for event_type, value in self.all_streams_info.items():
+            if event_type == self.USER:
                 continue
-            if key == self.CANDLE:
+            if event_type == self.CANDLE:
                 for interval, symbols in value.items():
                     for symbol in symbols:
-                        l.append(ExchangeFeedKafka(self.BINANCE, key, interval, symbol))
+                        lst.append(ExchangeFeed(self.BINANCE, "", symbol, event_type, interval, {}))
                 continue
             for symbol in value:
-                l.append(ExchangeFeedKafka(self.BINANCE, key, "", symbol))
-        return l
+                lst.append(ExchangeFeed(self.BINANCE, "", symbol, event_type, "", {}))
+        return lst
 
-    # <--- STREAM --->
+    async def normalize_msg(self, msg):
+        if not msg['data']:
+            return msg
+        m = msg['data']
+        res_type = m['e']
+        d = datetime.datetime.fromtimestamp(m['E'] / 1000).strftime("%m/%d/%Y, %H:%M:%S")
+        m['E'] = d
 
-    async def start(self) -> None:
-        status = await self._check_availability_status()
-        if not status:
-            print("binance is offline")
-            return
-        print("starting streams")
-        tasks = []
-        if len(self._runnable_streams) > 0:
-            feed = self._feed()
-            tasks.append(feed)
-        if self.USER in self.all_streams_info:
-            user = self._user_feed()
-            tasks.append(user)
-        if not tasks:
-            return
-        self._feeds_coroutine = await asyncio.gather(*tasks, return_exceptions=True)
-
-    async def _process_msg(self, msg) -> None:
-        res_type = msg['data']['e']
+        efk = ExchangeFeed(symbol=m['s'], interval="", exchange=self.BINANCE,
+                           event_type=res_type, data=m, event_time=d)
         if res_type == self.CANDLE:
-            efk = ExchangeFeedKafka(symbol=msg['data']['s'], interval=msg['data']['k']['i'], exchange=self.BINANCE,
-                                    event=res_type)
-        else:
-            efk = ExchangeFeedKafka(symbol=msg['data']['s'], interval="", exchange=self.BINANCE,
-                                    event=res_type)
-        asyncio.create_task(self.channels[res_type].write(efk, msg))
-
-    # async def normalize_depth_update(self, msg):
-    #     y = msg['data']
-
-    async def _feed(self) -> None:
-        await asyncio.sleep(self.delay_start)
-        feed_start_time = time.time()
-        print("STREAMS:   ", self._runnable_streams)
-        print("number of streams : ", len(self._runnable_streams))
-        sm = self.binance_socket_manager.multiplex_socket(self._runnable_streams)
-        msg_count = 0
-        async with sm as stream:
-            while True:
-                res = await stream.recv()
-                print(msg_count, "--binance msg")
-                msg_count += 1
-                asyncio.create_task(self._process_msg(res))
-                feed_since_start = time.time() - feed_start_time
-                if feed_since_start >= self.timeout:
-                    print("msg count:", msg_count)
-                    self._feeds_coroutine.cancel()
-                    print("feed run time : ", feed_since_start)
-                print()
-
-    async def _user_feed(self) -> None:
-        print("starting user feed")
-        await asyncio.sleep(self.delay_start)
-        user_feed_start_time = time.time()
-        bsm = self.binance_socket_manager
-        ts = bsm.user_socket()
-        async with ts as user_stream:
-            while True:
-                print("user socket listening")
-                res = await user_stream.recv()
-                print("got some user update")
-                print(res)
-                user_feed_since_start = time.time() - user_feed_start_time
-                res["exchange"] = self.BINANCE
-                asyncio.create_task(self.channels[self.USER].write(res))
-                if user_feed_since_start >= self.timeout:
-                    self._feeds_coroutine.cancel()
-                    self._user_run = False
-
-    async def stop(self):
-        self._feeds_coroutine.cancel()
+            m.pop("s")
+            kline = m.pop("k")
+            kline['t'] = datetime.datetime.fromtimestamp(kline['t'] / 1000)
+            kline['T'] = datetime.datetime.fromtimestamp(kline['T'] / 1000)
+            m.update(kline)
+            efk = ExchangeFeed(symbol=m['s'], interval=m['i'], exchange=self.BINANCE,
+                               event_type=res_type, data=m, event_time=d)
+        return efk
 
     def __str__(self) -> str:
-        c_str = f'exchange: {self.BINANCE} feeds : \n'
-        for stream, symbols in self.all_streams_info.items():
-            c_str += f'stream:{stream} symbol-count:{len(symbols)},symbols:{symbols}'
+        lst = self.get_all_exchange_feed()
+        symbols = []
+        for feed in lst:
+            symbols.append(feed.symbol)
+        symbols = list(set(symbols))
+        c_str = f'exchange: {self.BINANCE} \n'
+        c_str += f'{len(symbols)} symbols: {symbols} \n'
+        c_str += f'feeds: \n'
+        index = 0
+        for feed in lst:
+            index += 1
+            c_str += f'{index}: {feed.exchange}-{feed.symbol}-{feed.event_type}-{feed.interval}'
         return c_str

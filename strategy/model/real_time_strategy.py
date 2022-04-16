@@ -3,13 +3,12 @@ from abc import ABC
 from typing import Type
 
 from client.backend.kafka_impl import get_exchange_kafka_topics
-from client.file_handler import KafkaFileConsumer
 from client.exchange.exchange_model.exchange import Exchange
-from client.strategy.model.base_strategy import BaseStrategy
+from client.strategy.model.base_trading_strategy import BaseTradingStrategy
 
 
 # ttlcache
-class RealTimeStrategy(BaseStrategy):
+class RealTimeStrategy(BaseTradingStrategy):
 
     def __init__(self,
                  strategy_name: str,

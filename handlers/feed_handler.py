@@ -1,14 +1,12 @@
 import asyncio
-from typing import Type, Union
-
-from client.exchange.binance_impl import Binance
-from client.exchange.exchange_model.exchange import Exchange, RestExchange
-from client.util.data_classes import ExchangeFeedKafka
+import time
+from client.util.data_classes import ExchangeFeed
 
 
 class FeedHandler:
 
-    def __init__(self, exchange) -> None:
+    def __init__(self, exchange, callback=None) -> None:
+        self.callback = callback
         self.exchanges = []
         self.feeds_coroutines = None
         self.feeds_coroutines_gather = None
@@ -20,21 +18,36 @@ class FeedHandler:
         else:
             self.exchanges.append(exchange)
 
-    def get_exchanges_kafka_streams(self) -> list[ExchangeFeedKafka]:
+    def get_exchanges_feeds(self) -> list[ExchangeFeed]:
         ready_list = []
         for exchange in self.exchanges:
-            lst = exchange.get_all_streams_kafka_topics()  # list[ExchangeFeedKafka]
+            lst = exchange.get_all_exchange_feed()  # list[ExchangeFeed]
             ready_list.extend(lst)
         return ready_list
 
     async def start_feed(self):
-        self.running = True
         tasks = []
-        for exchange_feed in self.exchanges:
-            tasks.append(exchange_feed.start())
-        self.feeds_coroutines = tasks
-        print("init feeds gathering")
+        for exchange in self.exchanges:
+            tasks.append(self.feed(exchange, await exchange.get_feed_socket_object()))
+            for key, val in exchange.get_streams().items():
+                if "user" in key:
+                    tasks.append(self.feed(exchange, await exchange.get_user_socket_object()))
+
+        self.running = True
         self.feeds_coroutines_gather = await asyncio.gather(*tasks, return_exceptions=True)
+
+    async def feed(self, exchange, socket_obj):
+        await asyncio.sleep(exchange.get_delay_start())
+        feed_start_time = time.time()
+        async with socket_obj as stream:
+            while True:
+                res = await stream.recv()
+                msg = await exchange.normalize_msg(res)
+                if self.callback:
+                    asyncio.create_task(self.callback(msg))
+                feed_since_start = time.time() - feed_start_time
+                if feed_since_start >= exchange.get_timeout():
+                    break
 
     async def stop_all(self):
         try:
