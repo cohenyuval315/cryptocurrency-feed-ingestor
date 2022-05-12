@@ -6,9 +6,20 @@ ORDER BOOK
 CLEANING
 FILTERS
 ORDER MODULES-MAYBE
-ACCOUNT MANAGER-0MAYBE
+ACCOUNT MANAGER-MAYBE
 LOGGER
 EXCEPTIONS
 SYMBOL CLASS - CONCEPTUAL CLASS FOR BOUNDARY CLASS
 GUI
+DATE HANDLER
 
+  if (timestamp < (serverTime + 1000) && (serverTime - timestamp) <= recvWindow){
+    // process request
+  }
+  else {
+    // reject request
+  } It is recommended to use a small recvWindow of 5000 or less!
+ Timing Security
+A SIGNED endpoint also requires a parameter, timestamp, to be sent which should be the millisecond timestamp of when the request was created and sent.
+An additional parameter, recvWindow, may be sent to specify the number of milliseconds after timestamp the request is valid for. If recvWindow is not sent, it defaults to 5000.
+argparse

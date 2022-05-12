@@ -18,3 +18,4 @@ class ExchangeFeed:
     event_type: str
     interval: str = None
     data: dict = None
+

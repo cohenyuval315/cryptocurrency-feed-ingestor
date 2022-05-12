@@ -6,7 +6,7 @@ import numpy as np
 from client.creds.creds_helpers import load_correct_key_info, load_config
 from client.exchange.binance_impl import Binance
 from client.handlers.feed_handler import FeedHandler
-from client.backend.kafka_impl import CandleKafka, TradeKafka, UserKafka, BookKafka, AggTradeKafka, KafkaFeedProducer, \
+from client.kafka.kafka_impl import CandleKafka, TradeKafka, UserKafka, BookKafka, AggTradeKafka, KafkaFeedProducer, \
     KafkaFeedConsumer
 import atexit
 import multiprocessing as mp
@@ -17,8 +17,13 @@ from client.strategy.interval_strats.dollar_cost_averaging import DCA
 filename = "creds_keys.yml"
 abo_path = os.path.abspath(__file__).replace(os.path.basename(__file__), "") + r"creds\\"
 filepath = pathlib.Path(abo_path, filename)
-api_key, api_secret = load_correct_key_info(load_config(filepath))
+binance_api_key, binance_api_secret = load_correct_key_info(load_config(filepath), "binance")
 
+CANDLE = "kline"
+USER = "user"
+TRADE = "trade"
+BOOK = "book"
+AGG_TRADE = "aggTrade"
 
 # DEPTH_100_ms = "depth100"
 # DEPTH_1000_ms = "depth"
@@ -40,20 +45,7 @@ api_key, api_secret = load_correct_key_info(load_config(filepath))
 
 
 async def feed():
-    CANDLE = "kline"
-    USER = "user"
-    TRADE = "trade"
-    BOOK = "book"
-    AGG_TRADE = "aggTrade"
-    # candle_kafka = CandleKafka()
-    # trade_kafka = TradeKafka()
-    # user_kafka = UserKafka()
-    # book_kafka = BookKafka()
-    # agg_kafka = AggTradeKafka()
-    kafka = KafkaFeedProducer()
-    # kafka = {CANDLE: candle_kafka, TRADE: trade_kafka,
-    #          AGG_TRADE: agg_kafka, USER: user_kafka, BOOK: book_kafka}
-    client = await AsyncClient.create(api_key=api_key, api_secret=api_secret)
+    client = await AsyncClient.create(api_key=binance_api_key, api_secret=binance_api_secret)
     bsm = BinanceSocketManager(client=client)
 
     # max 5 binances instances (= 5 connections max, with 950 max streams each)| calculations: not counting user stream
@@ -69,21 +61,21 @@ async def feed():
 
     symbols = await binance1.get_spot_symbols_names()
     #
-    #symbols = symbols[:100]
-
+    # symbols = symbols[:100]
     splits = np.array_split(symbols, 3)
     s1 = splits[0]
     s2 = splits[1]
     s3 = splits[2]
-    max_streams = 953
+    max_streams_num_per_connection = 953  # in my environment
 
     binance1.add_feed(symbols=s1, streams=[USER, CANDLE])
     binance2.add_feed(symbols=s2, streams=[USER, CANDLE])
     binance3.add_feed(symbols=s3, streams=[USER, CANDLE])
 
-    fh = FeedHandler([binance1, binance2],callback=kafka.write_feed)
-    feeds = fh.get_exchanges_feeds()
+    kafka = KafkaFeedProducer()
+    fh = FeedHandler([binance1, binance2], callback=kafka.write_feed)
 
+    feeds = fh.get_exchanges_feeds()
     for exchange_feed in feeds:
         await kafka.write_feed(exchange_feed)
 
@@ -93,14 +85,17 @@ async def feed():
     tasks = [fh.start_feed(), consume(consumer)]
     await asyncio.gather(*tasks, return_exceptions=True)
 
+
 async def consume(consumer):
     while True:
         m = await consumer.read_feed()
+
 
 def feeds_init():
     start_time = time.time()
     try:
         asyncio.run(feed())
+
     except Exception as e:
         print(e)
         print("interrupt:")
@@ -130,6 +125,7 @@ def p4():
     print("NotImplementedYet")
 
 
+# i got 4 cpu cores
 if __name__ == '__main__':
     loop = asyncio.get_event_loop()
     loop.set_debug(True)

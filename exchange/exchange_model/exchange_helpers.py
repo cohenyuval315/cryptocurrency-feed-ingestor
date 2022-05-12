@@ -1,7 +1,8 @@
 from datetime import datetime
-from client.util.time import str_to_time
+from client.util.time import  Interval
 
-# only work for binance todo
+
+# only work for binance
 def limit_num_api(request_size, is_order=False):
     def wrapper(coroutine):
         async def wrapped(self, **kwargs):
@@ -14,9 +15,10 @@ def limit_num_api(request_size, is_order=False):
             if is_order:
                 # orders per sec limit
                 ol1 = self.order_limits[0]
-                i = str_to_time(ol1.interval)
-                i_n = ol1.interval_num
-                total_time = i * i_n  # sec interval
+
+                interval = Interval(ol1.interval, ol1.interval_num)
+                total_time = await interval.interval_to_sec()  # sec interval
+
                 day_orders = self.limit_order_num[1]  # number of current sec orders
                 order_limit_timeframe = (
                         datetime.now() - self.date_time_for_sec_limits).total_seconds()  # time passed since last order
@@ -29,9 +31,10 @@ def limit_num_api(request_size, is_order=False):
                 # order per day limit
                 # UTC 00:00:00 day reset
                 ol2 = self.order_limits[1]
-                i = str_to_time(ol2.interval)
-                i_n = ol2.interval_num
-                total_time = i * i_n  # day interval
+
+                interval = Interval(ol2.interval, ol2.interval_num)
+                total_time = await interval.interval_to_sec()  # day interval in seconds
+
                 order_limit_sec = self.limit_order_num[0]  # number of current day orders
                 order_limit_timeframe = (
                         datetime.now() - self.date_time_for_day_limits).total_seconds()  # time passed since last order
@@ -55,52 +58,6 @@ def limit_num_api(request_size, is_order=False):
 
     return wrapper
 
-# RateLimit Handler Class
-# class RateLimitHandler(object):
-#     def __init__(self, func,weight,):
-#         functools.update_wrapper(self, func)
-#         self.method = func
-#
-#     def __get__(self, instance, owner):
-#         return type(self)(self.method.__get__(instance, owner))
-#
-#     def __call__(self, *args, **kwargs):
-#         # do stuff before
-#         retval = self.method(*args, **kwargs)
-#         # do stuff after
-#         return retval
-#
-# def prep_api_request(request_size):
-#     def wrapper(coroutine):
-#         async def api_wrapped(args, *kwargs):
-#             print("prep_api    //  ", args, "   //   ", *kwargs)
-#             print(coroutine)
-#             con = await args.check_api_precondition(request_size)
-#             if not con:
-#                 print("too much requests in this interval")
-#                 return False
-#             res = await coroutine(args, kwargs)
-#             lst = list(args.api_limits.keys())
-#             args.api_limits[lst[0]] += request_size
-#             return res
-#         return api_wrapped
-#     return wrapper
-#
-#
-# def prep_order_request(coroutine):
-#     async def wrapped(args, *kwargs):
-#         print("prep_order    //  ", args,"   //   ", *kwargs)
-#         print(coroutine)
-#         con = await args.check_order_precondition()
-#         if not con:
-#             print("too much orders in this interval")
-#             return False
-#         #res = await coroutine(args, kwargs)
-#         for limit in args.order_limits.items():
-#             args.order_limits[limit] += 1
-#         #return res
-#         return coroutine(args, kwargs)
-#     return wrapped
 
 
 if __name__ == '__main__':

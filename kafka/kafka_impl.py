@@ -10,15 +10,15 @@ def get_exchange_kafka_topics(exchange, symbols: list, streams: list, candle_int
     lst = []
     for symbol in symbols:
         for stream in streams:
-            if "user" in streams:
-                continue
-            if "kline" in streams:
+            topic_stream = f"{exchange.get_name()}-{symbol}-{stream}"
+            if "user" in stream:
+                topic_stream = f"{exchange.get_name()}-user"
+            if "kline" in stream:
                 for interval in candle_intervals:
-                    topic_stream = f"{exchange.get_name()}-{stream}-{interval}-{symbol}"
+                    topic_stream = f"{exchange.get_name()}-{symbol}-{stream}-{interval}"
                     lst.append(topic_stream)
-            else:
-                topic_stream = f"{exchange.get_name()}-{stream}-{symbol}"
-                lst.append(topic_stream)
+                continue
+            lst.append(topic_stream)
     return lst
 
 
@@ -30,6 +30,7 @@ class BaseKafka:
         self.client_id = client_id
 
 
+# not used in this project part
 class KafkaFeedConsumer(BaseKafka):
 
     def __init__(self, **kwargs):
@@ -61,22 +62,6 @@ class KafkaFeedConsumer(BaseKafka):
     async def subscribe_topics(self, topics: list):
         await self.__connect()
         self.consumer.subscribe(topics=topics)
-
-    # async def read(self, process_msg=None):
-    #
-    #     while True:
-    #         try:
-    #             async for msg in self.consumer:
-    #                 if not msg:
-    #                     continue
-    #                 print("consumed")
-    #                 if process_msg:
-    #                     m = json.loads(msg.value.decode("utf-8"))
-    #
-    #                     await process_msg(m)
-    #         except Exception as e:
-    #             print(e)
-    #             await self.stop()
 
     async def _process_msg(self, msg):
         return json.loads(msg.value.decode("utf-8"))
@@ -133,9 +118,10 @@ class KafkaFeedProducer(BaseKafka):
         if efk.event_type == "kline":
             topic = f"{efk.exchange}-{efk.symbol}-{efk.event_type}-{efk.interval}"
         try:
-            if not efk.data:
-                efk.data = alternative_data
-            await self.producer.send_and_wait(topic, json.dumps(efk.data, default=str).encode(
+            data = efk.data
+            if not data:
+                data = alternative_data
+            await self.producer.send_and_wait(topic, json.dumps(data, default=str).encode(
                 'utf-8'))  # ,partition=0) todo maybe add another function for this seperate , get topic partition etc probably harder on performance
             print("kafka-fin")
         except Exception as e:
@@ -147,33 +133,27 @@ class KafkaFeedProducer(BaseKafka):
 
 
 # <--->
-# MIGHT HELP PERFORMANCE LATER ON , WITH MORE STREAMS
-
-class CandleKafka(KafkaFeedProducer):
-    default_key = "kline"
-
-
-class UserKafka(KafkaFeedProducer):
-    default_key = "user"
-
-
-class TradeKafka(KafkaFeedProducer):
-    default_key = 'trade'
-
-
-class AggTradeKafka(KafkaFeedProducer):
-    default_key = 'aggTrade'
-
-
-class BookKafka(KafkaFeedConsumer):
-    default_key = "book"
-
-
-class DepthKafka(KafkaFeedProducer):
-    default_key = 'depth'
-
-    # def __init__(self, *args, snapshots_only=False, snapshot_interval=1000, **kwargs):
-    #     self.snapshots_only = snapshots_only
-    #     self.snapshot_interval = snapshot_interval
-    #     self.snapshot_count = defaultdict(int)
-    #     super().__init__(*args, **kwargs)
+# last resort for performance
+#
+# class CandleKafka(KafkaFeedProducer):
+#     default_key = "kline"
+#
+#
+# class UserKafka(KafkaFeedProducer):
+#     default_key = "user"
+#
+#
+# class TradeKafka(KafkaFeedProducer):
+#     default_key = 'trade'
+#
+#
+# class AggTradeKafka(KafkaFeedProducer):
+#     default_key = 'aggTrade'
+#
+#
+# class BookKafka(KafkaFeedConsumer):
+#     default_key = "book"
+#
+#
+# class DepthKafka(KafkaFeedProducer):
+#     default_key = 'depth'

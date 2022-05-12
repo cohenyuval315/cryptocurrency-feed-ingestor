@@ -1,4 +1,3 @@
-
 import datetime
 from binance import AsyncClient, BinanceSocketManager, Client
 from binance.enums import HistoricalKlinesType
@@ -29,7 +28,7 @@ class BinanceRest(RestExchange):
         self.coins_info = None
 
     def init_information(self, *kwargs):
-        c = Client()  # todo clean
+        c = Client()
         self.exchange_info = c.get_exchange_info()
         self.valid_symbols = [symbol["symbol"] for symbol in self.exchange_info["symbols"] if
                               symbol["isSpotTradingAllowed"]]
@@ -172,6 +171,13 @@ class BinanceRest(RestExchange):
         if not self.exchange_info:
             return
         return self.exchange_info["symbols"]
+
+    async def get_symbol_info(self, symbol):
+        symbols = self.exchange_info["symbols"]  # list of dicts
+        for d in symbols:
+            for key, value in d.items():
+                if value == symbol:
+                    return d
 
     @limit_num_api(10)
     async def get_exchange_info(self, **kwargs):
@@ -624,6 +630,7 @@ class Binance(Feed, BinanceRest):
     # KLINE_INTERVAL_1MONTH = '1M'
     # order_status = {'NEW', 'PARTIALLY_FILLED', 'FILLED', 'CANCELED', 'PENDING_CANCEL', 'REJECTED', 'EXPIRED'}
     # order_resp_type = {'ACK', 'RESULT', 'FULL'}
+    # respone  ^ t ype
     # aggregate_info_type = {'ACK', 'RESULT', 'FULL', 'a', 'p', 'q', 'f', 'l', 'T', 'm', 'M'}
     # For accessing the data returned by Client.aggregate_trades().
     # ORDER_RESP_TYPE_ACK

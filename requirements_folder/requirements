@@ -1,6 +1,1 @@
 python-binance
-TA-lib - maybe for strategy
-numpy
-python websocket client
-#venv-virtual environment can install all of those ^
-#easily pip3 install -r this.file.name.txt

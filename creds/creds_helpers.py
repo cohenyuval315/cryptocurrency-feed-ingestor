@@ -3,12 +3,13 @@ from sys import exit
 import yaml
 
 
-def load_correct_key_info(info):
+def load_correct_key_info(info, exchange: str):
     try:
-        return info['product']['binance_access_key'], info['product']['binance_secret_key']
+        return info['product'][exchange + '_access_key'], info['product'][exchange + '_secret_key']
     except Exception as e:
         print("error fetching keys")
         print(e)
+
 
 def load_config(file):
     try:

@@ -27,6 +27,9 @@ class RestExchange:
     async def get_all_symbols_info(self, **kwargs):
         raise NotImplementedError
 
+    async def get_symbol_info(self, **kwargs):
+        raise NotImplementedError
+
     async def get_spot_symbols_names(self, **kwargs):
         raise NotImplementedError
 
